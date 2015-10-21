@@ -13,11 +13,11 @@ using System.Xml;
 using System.Xml.Linq;
 using System.Diagnostics;
 using System.Text;
-using Newtonsoft.Json;
+using TempoProxy.Models;
 
 namespace TempoProxy.Controllers
 {
-    [RoutePrefix("api/Proxy")]
+    [RoutePrefix("api/Proxy")]    
     public class ProxyController : ApiController
     {
         private static XmlDocument MakeRequest(string requestUrl)
@@ -41,45 +41,84 @@ namespace TempoProxy.Controllers
 
         private static List<string> GetEnabledDevs()
         {
-            IFileWorker file = new FileWorker(null);
-            String dataFromFile = file.ReadFile();
-
-            List<string> Devs = JsonConvert.DeserializeObject<List<string>>(dataFromFile);
+            List<string> Devs = new List<string>();
+            Devs.Add("yaroslav.kirilishen@caddiesoft.com");
             return Devs;
         }
 
-
         //api/Media/GetReport                
         [Route("GetReport")]
-        public HttpResponseMessage GetReport()
+        public HttpResponseMessage GetReport(string dateFrom, string dateTo, string ClientKey)
         {
-            XmlDocument RawXml = MakeRequest("https://caddiesoft.atlassian.net/plugins/servlet/tempo-getWorklog/?dateFrom=2011-01-01&dateTo=2015-01-31&format=xml&diffOnly=false&tempoApiToken=818caed8-4359-4b62-a681-d9cf25098e16");
-            
-            MemoryStream xmlStream = new MemoryStream( );
-            RawXml.Save(xmlStream);
-            xmlStream.Flush();
-            xmlStream.Position = 0;
+            if (ClientKey == ConfigurationManager.AppSettings.Get("clientKey"))
+            {                
+                string Url = string.Concat(ConfigurationManager.AppSettings.Get("tempoUrl"),
+                                           "?dateFrom={0}&",
+                                           "dateTo={1}&",
+                                           "format=xml&",
+                                           "diffOnly=false&",
+                                           "tempoApiToken=" + ConfigurationManager.AppSettings.Get("tempoApiToken"));
 
-            XElement root = XElement.Load(xmlStream);
+                Url = string.Format(Url, dateFrom, dateTo);
 
-            var EnabledDevs = GetEnabledDevs();
+                XmlDocument RawXml = MakeRequest(Url);
 
-            XDocument output = new XDocument(new XElement(root.Name, root.Elements("worklog")
-                .Where(d => EnabledDevs.Contains((string)d.Element("staff_id"))))); 
-                                                    
-            using (var stringWriter = new StringWriter())
-            using (var xmlTextWriter = XmlWriter.Create(stringWriter))
+                if (RawXml != null)
+                {
+                    try
+                    {
+                        MemoryStream xmlStream = new MemoryStream();
+                        RawXml.Save(xmlStream);
+                        xmlStream.Flush();
+                        xmlStream.Position = 0;
+
+                        XElement root = XElement.Load(xmlStream);
+
+                        var EnabledDevs = GetEnabledDevs();
+
+                        XDocument output = new XDocument(new XElement(root.Name, root.Elements("worklog")
+                            .Where(d => EnabledDevs.Contains((string)d.Element("staff_id")))));
+
+                        using (var stringWriter = new StringWriter())
+                        using (var xmlTextWriter = XmlWriter.Create(stringWriter))
+                        {
+                            output.WriteTo(xmlTextWriter);
+                            xmlTextWriter.Flush();
+                            string XMLString = stringWriter.GetStringBuilder().ToString();
+
+                            return new HttpResponseMessage()
+                            {
+                                Content = new StringContent(XMLString,
+                                    Encoding.UTF8, "application/xml")
+                            };
+                        }
+                    }
+                    catch (Exception exc)
+                    {
+                        return new HttpResponseMessage()
+                        {
+                            StatusCode   = HttpStatusCode.InternalServerError,
+                            ReasonPhrase = exc.Message
+                        };
+                    }
+                }
+                else
+                {
+                    return new HttpResponseMessage()
+                    {
+                        StatusCode   = HttpStatusCode.NoContent,
+                        ReasonPhrase = "Jira return empty XML file"
+                    };
+                }
+            }
+            else
             {
-                output.WriteTo(xmlTextWriter);
-                xmlTextWriter.Flush();
-                string XMLString = stringWriter.GetStringBuilder().ToString();
-                                
                 return new HttpResponseMessage()
                 {
-                    Content = new StringContent(XMLString,
-                        Encoding.UTF8, "application/xml")
-                };            
-            }                                                
+                    StatusCode     = HttpStatusCode.BadRequest,
+                    ReasonPhrase   = "Invalid clientKey"
+                };
+            }                   
         }     
     }
 }
