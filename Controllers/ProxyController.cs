@@ -13,11 +13,11 @@ using System.Xml;
 using System.Xml.Linq;
 using System.Diagnostics;
 using System.Text;
-using TempoProxy.Models;
+using Newtonsoft.Json;
 
 namespace TempoProxy.Controllers
 {
-    [RoutePrefix("api/Proxy")]    
+    [RoutePrefix("api/Proxy")]
     public class ProxyController : ApiController
     {
         private static XmlDocument MakeRequest(string requestUrl)
@@ -41,8 +41,10 @@ namespace TempoProxy.Controllers
 
         private static List<string> GetEnabledDevs()
         {
-            List<string> Devs = new List<string>();
-            Devs.Add("yaroslav.kirilishen@caddiesoft.com");
+            IFileWorker file = new FileWorker(null);
+            String dataFromFile = file.ReadFile();
+
+            List<string> Devs = JsonConvert.DeserializeObject<List<string>>(dataFromFile);
             return Devs;
         }
 
@@ -58,7 +60,7 @@ namespace TempoProxy.Controllers
                                            "format=xml&",
                                            "diffOnly=false&",
                                            "tempoApiToken=" + ConfigurationManager.AppSettings.Get("tempoApiToken"));
-
+            
                 Url = string.Format(Url, dateFrom, dateTo);
 
                 XmlDocument RawXml = MakeRequest(Url);
@@ -68,31 +70,31 @@ namespace TempoProxy.Controllers
                     try
                     {
                         MemoryStream xmlStream = new MemoryStream();
-                        RawXml.Save(xmlStream);
-                        xmlStream.Flush();
-                        xmlStream.Position = 0;
+            RawXml.Save(xmlStream);
+            xmlStream.Flush();
+            xmlStream.Position = 0;
 
-                        XElement root = XElement.Load(xmlStream);
+            XElement root = XElement.Load(xmlStream);
 
-                        var EnabledDevs = GetEnabledDevs();
+            var EnabledDevs = GetEnabledDevs();
 
-                        XDocument output = new XDocument(new XElement(root.Name, root.Elements("worklog")
-                            .Where(d => EnabledDevs.Contains((string)d.Element("staff_id")))));
-
-                        using (var stringWriter = new StringWriter())
-                        using (var xmlTextWriter = XmlWriter.Create(stringWriter))
-                        {
-                            output.WriteTo(xmlTextWriter);
-                            xmlTextWriter.Flush();
-                            string XMLString = stringWriter.GetStringBuilder().ToString();
-
-                            return new HttpResponseMessage()
-                            {
-                                Content = new StringContent(XMLString,
-                                    Encoding.UTF8, "application/xml")
-                            };
-                        }
-                    }
+            XDocument output = new XDocument(new XElement(root.Name, root.Elements("worklog")
+                .Where(d => EnabledDevs.Contains((string)d.Element("staff_id"))))); 
+                                                    
+            using (var stringWriter = new StringWriter())
+            using (var xmlTextWriter = XmlWriter.Create(stringWriter))
+            {
+                output.WriteTo(xmlTextWriter);
+                xmlTextWriter.Flush();
+                string XMLString = stringWriter.GetStringBuilder().ToString();
+                                
+                return new HttpResponseMessage()
+                {
+                    Content = new StringContent(XMLString,
+                        Encoding.UTF8, "application/xml")
+                };            
+            }                                                
+        }     
                     catch (Exception exc)
                     {
                         return new HttpResponseMessage()
